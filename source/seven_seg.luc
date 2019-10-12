@@ -1,0 +1,13 @@
+module seven_seg (
+    input char[4],
+    output segs[7]
+  ) {
+
+  always {
+    case (char) {
+      1: segs = 7b1110011;        //character "P" representing PASS
+      2: segs = 7b1110001;        //character "F" representing FAIL
+      default: segs = 7b0000000;
+    }
+  }
+}

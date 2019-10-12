@@ -1,0 +1,29 @@
+module fulladder (
+    input a,
+    input b,
+    input cIn,
+    output sum,
+    output cOut
+  ) {
+
+  always {                //truth table for full adder
+    sum=0;
+    cOut=0;
+    if (a+b+cIn==0){      //when all 3 inputs are 0
+      sum = 0;
+      cOut = 0;
+      }
+    if (a+b+cIn==1){      //when either 1 of 3 inputs is 1
+      sum = 1;
+      cOut = 0;
+      }
+    if (a+b+cIn==2){      //when either 2 of 3 inputs is 1
+      sum = 0;
+      cOut = 1;
+      }
+    if (a+b+cIn==3){      //when all 3 inputs are 1
+      sum = 1;
+      cOut = 1;
+      }
+  }
+}

@@ -1,0 +1,134 @@
+module mojo_top (
+    input clk,              // 50MHz clock
+    input rst_n,            // reset button (active low)
+    output led [8],         // 8 user controllable LEDs
+    input cclk,             // configuration clock, AVR ready when high
+    output spi_miso,        // AVR SPI MISO
+    input spi_ss,           // AVR SPI Slave Select
+    input spi_mosi,         // AVR SPI MOSI
+    input spi_sck,          // AVR SPI Clock
+    output spi_channel [4], // AVR general purpose pins (used by default to select ADC channel)
+    input avr_tx,           // AVR TX (FPGA RX)
+    output avr_rx,          // AVR RX (FPGA TX)
+    input avr_rx_busy,      // AVR RX buffer full
+    output io_led [3][8],   // LEDs on IO Shield
+    output io_seg [7],      // 7-segment LEDs on IO Shield
+    output io_sel [4],      // Digit select on IO Shield
+    input io_button [5],    // 5 buttons on IO Shield
+    input io_dip [3][8],    // DIP switches on IO Shield
+    output out[3],
+    input io[3]
+  ) {
+  
+  const NUM_STATES = 8;     //sets the maximum number of states in binary, from 000 to 111
+  
+  sig rst;                  // reset signal
+  fulladder fa;             //full adder module to check if input from ALU is correct
+  seven_seg seg;            //seven segment display module
+  
+  .clk(clk) {
+    // The reset conditioner is used to synchronize the reset signal to the FPGA
+    // clock. This ensures the entire FPGA comes out of reset at the same time.
+    reset_conditioner reset_cond;
+    .rst(rst){
+      counter slowclk(#SIZE(1),#DIV(25));
+    }
+  }
+  .clk(slowclk.value){
+    .rst(rst){
+       fsm state = {PASS, FAIL};      //initialise 2 states fsm, pass state and fail state
+    }
+    dff count[$clog2(NUM_STATES)];    //counter to loop through maximum number of states
+  }
+  always {
+    reset_cond.in = ~rst_n; // input raw inverted reset signal
+    rst = reset_cond.out;   // conditioned reset
+    
+    led = 8h00;             // turn LEDs off
+    spi_miso = bz;          // not using SPI
+    spi_channel = bzzzz;    // not using flags
+    avr_rx = bz;            // not using serial port
+    
+    io_led = 3x{{8h00}};    // turn LEDs off
+    io_seg = 8hff;          // turn segments on
+    io_sel = 4hf;           // select all digits
+    
+    out = 0;                //set all outputs to 0
+    fa.a = io_dip[0][0];    //assign dip switch 1 as A to full adder module
+    fa.b = io_dip[0][1];    //assign dip switch 2 as B to full adder module
+    fa.cIn = io_dip[0][2];  //assign dip switch 3 as carry in to full adder module
+    seg.char = 1;           //assign "P" character to output
+
+    //for both manual and automatic checking of the ALU will have 2 sets of A, B, cIn, sum, cOut. 
+    //one set to be on the io shield and the other to be reflected on the ALU itself i.e. onboard A and alu A
+    //this will facilitate checking if the desired inputs and outputs are correct, 
+    //with the inputs and outputs on the io shield as the correct set
+    
+    //MANUAL
+    if (io_dip[1][0]==0) {
+      io_led[0] = 8x{fa.sum};                    //assign carry out to led row on right
+      io_led[1] = 8x{fa.cOut};                   //assign sum to led row in the middle
+      out[0] = io_dip[0][0];                     //assign dip switch 1 to output[0] (alu A)
+      out[1] = io_dip[0][1];                     //assign dip switch 2 to output[1] (alu B)        
+      out[2] = io_dip[0][2];                     //assign dip switch 3 to output[2] (alu carry in)
+      io_led[2][1:0] = 2x{io_dip[0][0]};         //assign last 2 leds on left row to be onboard A
+      io_led[2][4:3] = 2x{io_dip[0][1]};         //assign middle 2 leds on left row to be onboard B 
+      io_led[2][7:6] = 2x{io_dip[0][2]};         //assign first 2 leds on left row to be onboard carry in
+      if (fa.sum==io[0] && fa.cOut==io[1]) {     //checking if sum and cOut from ALU corresponds to io shield, if yes, prints "P" representing pass.
+        seg.char = 1;                            //assign "P" character to output
+        io_seg = ~seg.segs;
+        io_sel = ~4h1;  
+        }
+      else {
+        seg.char = 2;                          //assign "F" character to output
+        io_seg = ~seg.segs;
+        io_sel = ~4h1;
+        }    
+      }
+    
+    
+    //AUTO
+    if (io_dip[1][0]==1) {
+      count.d = 0;
+      seg.char = 2;
+      fa.a = count.q[0];                      //assign least signifcant bit of counter to full adder module A
+      fa.b = count.q[1];                      //assign second bit of counter to full adder module B
+      fa.cIn = count.q[2];                    //assign most signifcant bit of counter to full adder module carry in   
+      io_led[0] = 8x{fa.sum};                 //assign carry out to led row on right
+      io_led[1] = 8x{fa.cOut};                //assign sum to led row in the middle
+      out[0] = count.q[0];                    //assign least signifcant bit of counter to output[0] (alu A)
+      out[1] = count.q[1];                    //assign second bit of counter to output[1] (alu B)
+      out[2] = count.q[2];                    //assign most signifcant bit of counter to output[0] (alu carry in)
+      io_led[2][1:0] = 2x{count.q[0]};        //assign least signifcant bit of counter to last 2 leds on left row (onboard A)
+      io_led[2][4:3] = 2x{count.q[1]};        //assign second bit of counter to middle 2 leds on left row (onboard B)
+      io_led[2][7:6] = 2x{count.q[2]};        //assign most signifcant bit of counter to first 2 leds on left row (onboard carry in)  
+      
+      case (state.q) {
+      
+         state.FAIL:  
+          seg.char = 2;                            //assign "F" character to output
+          io_seg = ~seg.segs;                      //prints "F", representing fail, upon wrong test case, fpga will wait for correct input before continuing
+          io_sel = ~4h1; 
+          state.d = state.FAIL; 
+          if (io_button[1]) {
+            state.d = state.PASS;                  //assign a reset button and upon pressing, fpga will restart and check for all test cases
+            }
+          
+        state.PASS:
+          if (fa.sum==io[0] && fa.cOut==io[1]) {   //checking if sum and cOut from ALU corresponds to io shield, if yes, prints "P" representing pass.
+            seg.char = 1;                          //assign "P" character to output
+            io_seg = ~seg.segs;
+            io_sel = ~4h1;
+            count.d = count.q + 1;
+            state.d = state.PASS;                  //if the inputs from the ALU passes the test case, "P" will be printed, and the fpga moves on to the next test case
+            }
+          else {
+            seg.char = 2;                          //sets "F" as desired output
+            io_seg = ~seg.segs;
+            io_sel = ~4h1;
+            state.d = state.FAIL;
+            }
+        }
+      }
+  }
+}
